@@ -1,0 +1,277 @@
+---
+title: "DANGERDANGERDANGER"
+author: "Jacob Kalamvokis"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r}
+
+library(tidyverse)
+
+```
+
+```{r}
+
+# Adding in pitchers (doesn't need to be ran if you downloaded new danger_w_pitchers.csv)
+
+pbp_2024 <- read.csv("pbp_2024.csv")
+
+danger_data <- read.csv("danger.csv")
+
+pbp_2024_pitcher <- pbp_2024[, c("game_pk", "at_bat_number", "batter", "pitcher", "player_name")]
+
+danger_data_pitcher <- merge(danger_data, pbp_2024_pitcher, by = c("game_pk", "at_bat_number", "batter"), all.x = TRUE)
+
+danger_data_pitcher %>% distinct(game_pk, at_bat_number, batter, base_state, .keep_all = TRUE) -> danger_data_pitcher
+
+danger_data_pitcher <- danger_data_pitcher %>%
+  arrange(game_pk, at_bat_number)
+
+write.csv(danger_data_pitcher, file = "danger_w_pitchers.csv", row.names = FALSE)
+
+```
+
+```{r}
+
+danger_data_2024 <- read.csv("danger_w_pitchers.csv")
+
+```
+
+
+```{r}
+
+# Inning Level
+
+danger_data_2024 %>% group_by(game_pk, inning, pitcher) %>% 
+  mutate(actual_delta_WP_inning = last(total_WP_pitching_team_after) - first(total_WP_pitching_team_before)) %>% 
+  mutate(stat_inning_level = actual_delta_WP_inning - first(danger)) -> danger_data_2024
+
+danger_data_2024 %>% group_by(game_pk, pitcher, inning) %>% 
+  summarize(pitcher_name = first(player_name), stat_inning_level_for_sum = first(stat_inning_level)) %>% 
+  mutate(stat_appearance_level = sum(stat_inning_level_for_sum)) %>% ungroup() -> inn_by_inn_leaderboard
+
+# Appearance Level
+
+inn_by_inn_leaderboard %>% group_by(game_pk, pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_appearance_level = first(stat_appearance_level)) -> app_by_app_leaderboard
+
+# Season Level
+
+app_by_app_leaderboard %>% group_by(pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_season_level = sum(stat_appearance_level)) -> season_leaderboard
+
+```
+
+```{r}
+
+# Filtering for relievers:
+
+danger_data_2024 %>% group_by(pitcher) %>% 
+  mutate(season_batters_faced = n()) %>% ungroup() -> danger_data_2024
+
+danger_data_2024 %>% group_by(pitcher) %>% 
+  mutate(season_appearances = n_distinct(game_pk)) -> danger_data_2024
+
+danger_data_2024 %>% mutate(bf_per_app = season_batters_faced / season_appearances) -> danger_data_2024
+
+danger_data_2024 %>% group_by(pitcher) %>% 
+  summarize(pitcher_name = first(player_name), 
+            avg_bf_per_app = first(bf_per_app), 
+            total_appearances = first(season_appearances)) -> avg_bf_pitchers
+
+ggplot(avg_bf_pitchers, aes(x = avg_bf_per_app)) +
+  geom_histogram(fill = "blue", alpha = 0.5)
+
+avg_bf_pitchers %>% mutate(role = if_else(avg_bf_per_app < 15, "RP", "SP")) -> pitcher_roles
+
+```
+
+```{r}
+
+# RPs Only, all games
+
+season_leaderboard %>% 
+  left_join(pitcher_roles, by = c("pitcher_name", "pitcher")) %>%
+  filter(role == "RP", total_appearances > 10) -> rp_season_leaderboard
+
+```
+
+
+```{r}
+
+# ENTERING WHEN WINNING
+
+danger_data_2024 %>% group_by(game_pk, pitcher, inning) %>% filter(first(pitching_team_score_diff) > 0) %>% 
+  summarize(pitcher_name = first(player_name), stat_inning_level_for_sum = first(stat_inning_level)) %>% 
+  mutate(stat_appearance_level = sum(stat_inning_level_for_sum)) %>% ungroup() -> inn_by_inn_leaderboard_when_w
+
+# Appearance Level
+
+inn_by_inn_leaderboard_when_w %>% group_by(game_pk, pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_appearance_level = first(stat_appearance_level)) -> app_by_app_leaderboard_when_w
+
+app_by_app_leaderboard_when_w
+
+# Season Level
+
+app_by_app_leaderboard_when_w %>% group_by(pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_season_level = sum(stat_appearance_level),
+            appearances_when_w = n_distinct(game_pk), rate_stat = stat_season_level / appearances_when_w) -> season_leaderboard_when_w
+
+season_leaderboard_when_w %>% 
+  left_join(pitcher_roles, by = c("pitcher_name", "pitcher")) %>%
+  filter(role == "RP", appearances_when_w > 10) -> rp_season_leaderboard_when_w
+
+View(rp_season_leaderboard_when_w)
+
+```
+
+
+```{r}
+
+# ENTERING WHEN TIED
+
+danger_data_2024 %>% group_by(game_pk, pitcher, inning) %>% filter(first(pitching_team_score_diff) == 0) %>% 
+  summarize(pitcher_name = first(player_name), stat_inning_level_for_sum = first(stat_inning_level)) %>% 
+  mutate(stat_appearance_level = sum(stat_inning_level_for_sum)) %>% ungroup() -> inn_by_inn_leaderboard_when_tie
+
+# Appearance Level
+
+inn_by_inn_leaderboard_when_tie %>% group_by(game_pk, pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_appearance_level = first(stat_appearance_level)) -> app_by_app_leaderboard_when_tie
+
+# Season Level
+
+app_by_app_leaderboard_when_tie %>% group_by(pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_season_level = sum(stat_appearance_level),
+            appearances_when_tie = n_distinct(game_pk), rate_stat = stat_season_level / appearances_when_tie) -> season_leaderboard_when_tie
+
+season_leaderboard_when_tie %>% 
+  left_join(pitcher_roles, by = c("pitcher_name", "pitcher")) %>%
+  filter(role == "RP", appearances_when_tie > 10) -> rp_season_leaderboard_when_tie
+
+View(rp_season_leaderboard_when_tie)
+
+
+```
+
+```{r}
+
+# ENTERING WHEN LOSING
+
+danger_data_2024 %>% group_by(game_pk, pitcher, inning) %>% filter(first(pitching_team_score_diff) < 0) %>% 
+  summarize(pitcher_name = first(player_name), stat_inning_level_for_sum = first(stat_inning_level)) %>% 
+  mutate(stat_appearance_level = sum(stat_inning_level_for_sum)) %>% ungroup() -> inn_by_inn_leaderboard_when_l
+
+# Appearance Level
+
+inn_by_inn_leaderboard_when_l %>% group_by(game_pk, pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_appearance_level = first(stat_appearance_level)) -> app_by_app_leaderboard_when_l
+
+# Season Level
+
+app_by_app_leaderboard_when_l %>% group_by(pitcher) %>% 
+  summarize(pitcher_name = first(pitcher_name), stat_season_level = sum(stat_appearance_level),
+            appearances_when_l = n_distinct(game_pk), rate_stat = stat_season_level / appearances_when_l) -> season_leaderboard_when_l
+
+season_leaderboard_when_l %>% 
+  left_join(pitcher_roles, by = c("pitcher_name", "pitcher")) %>%
+  filter(role == "RP", appearances_when_l > 10) -> rp_season_leaderboard_when_l
+
+View(rp_season_leaderboard_when_l)
+
+```
+
+
+```{r}
+
+# I think the graph is THREAT x DANGER (danger essentially quantifies pressure here)?
+
+# Tell us about usage:
+
+danger_data_2024 %>% mutate(threat_x_runs = X1 + (X2*2) + (X3*3) + (X4*4) + (X5*5)) -> danger_data_2024
+
+danger_data_2024 %>% group_by(game_pk, player_name) %>% 
+  summarize(pitcher = first(pitcher), danger_of_app = first(danger), threat_of_app = first(threat_x_runs)) %>% ungroup() %>% 
+  group_by(player_name) %>% 
+  summarize(pitcher = first(pitcher), avg_danger_of_app = mean(danger_of_app), avg_threat_of_app = mean(threat_of_app)) -> situation_usage
+
+situation_usage
+
+pitcher_roles
+
+situation_usage %>% 
+  left_join(pitcher_roles, by = "pitcher") %>%
+  filter(role == "RP", total_appearances > 20) %>% 
+  select(-player_name) -> rp_avg_usage
+
+rp_avg_usage
+
+library(plotly)
+
+ggplot(rp_avg_usage, aes(x = avg_threat_of_app, y = abs(avg_danger_of_app))) +
+  geom_point(aes(text = paste("Player: ", pitcher_name, 
+                              "<br>Total Appearances: ", total_appearances))) +
+  geom_label(aes(label = pitcher_name), vjust = -0.5, size = 2) -> plot_attempt
+
+ggplotly(plot_attempt, tooltip = c("text", "x", "y"))
+
+```
+
+```{r}
+
+# Tells us about performance: SCRATCH THIS
+
+```
+
+```{r}
+
+hits_me <- read_csv("hits_me.csv")
+runs_me <- read_csv("runs_me.csv")
+
+ggplot(hits_me, aes(x = pa_since_last_hit, y = marginal_effect, fill = marginal_effect)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = round(marginal_effect, 5)), vjust = .4, hjust = 1.1, color = "white", size = 5, fontface = "bold") + 
+  labs(title = "Hits: Marginal Effects on Momentum", 
+       x = "Plate Appearances Since Last Hit", 
+       y = "Marginal Effects on Scoring a Run") +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(face = "bold", size = 14),
+    axis.title.x = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(face = "bold", size = 14),
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  ) + 
+  coord_flip() + 
+  scale_x_reverse() +
+  scale_fill_gradient(low = "gray", high = "red") +
+  guides(fill = guide_none()) -> hits_me_bar
+
+ggplot(runs_me, aes(x = pa_since_last_run, y = marginal_effect, fill = marginal_effect)) +
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = ifelse(pa_since_last_run == 15, "", round(marginal_effect, 5))), 
+            vjust = .4, hjust = 1.1, color = "white", size = 4, fontface = "bold") + 
+  labs(title = "Runs: Marginal Effects on Momentum", 
+       x = "Plate Appearances Since Last Run", 
+       y = "Marginal Effects on Scoring a Run") +
+  theme_bw() +
+  theme(
+    axis.title.y = element_text(face = "bold", size = 14),
+    axis.title.x = element_text(face = "bold", size = 14),
+    axis.text.x = element_text(face = "bold", size = 14),
+    axis.text.y = element_text(face = "bold", size = 14),
+    plot.title = element_text(face = "bold", size = 16, hjust = 0.5)
+  ) + 
+  coord_flip() + 
+  scale_x_reverse() +
+  scale_fill_gradient(low = "gray", high = "red") +
+  guides(fill = guide_none()) -> runs_me_bar
+
+ggsave("hits_me.png", plot = hits_me_bar, width = 10, height = 6, dpi = 300)
+ggsave("runs_me.png", plot = runs_me_bar, width = 10, height = 6, dpi = 300)
+
+```
+
+

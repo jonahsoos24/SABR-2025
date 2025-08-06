@@ -1,0 +1,141 @@
+
+```{r}
+innings <- pbp %>%
+  mutate(at_bat_pk = paste(game_pk, at_bat_number, batter,  sep = "_")) %>% 
+  mutate(new_observation_flag = ifelse((at_bat_pk != lag(at_bat_pk) | base_state != lag(base_state)), 1, 0)) %>% 
+  filter(new_observation_flag == 1) %>% 
+  mutate(
+    outs_recorded_flag = ifelse(lag(outs_when_up, default = first(outs_when_up)) != outs_when_up, 1, 0), 
+    ) %>%
+  group_by(game_pk, inning_topbot) %>%
+  arrange(at_bat_number) %>% 
+  mutate(total_outs_after_play = cumsum(outs_recorded_flag),
+         total_outs_before_play = lag(total_outs_after_play)) %>% 
+  ungroup() %>% 
+  mutate(pitching_team_score_diff = fld_score - bat_score,
+         runs_scored_on_play = post_bat_score - bat_score,
+         WPA_swing_pitching_team = ifelse(inning_topbot == 'Top', delta_home_win_exp, -delta_home_win_exp)) %>% 
+  arrange(game_pk, inning, at_bat_number) %>% 
+  dplyr::select(outs_recorded_flag, total_outs_after_play, total_outs_before_play, game_year,WPA_swing_pitching_team,
+                outs_when_up, events, description, pitcher, batter, game_date, game_pk,runs_scored_on_play,
+                at_bat_number, inning, inning_topbot, delta_home_win_exp, pitching_team_score_diff, base_state)
+
+aggregated_xwoba_batter <- pbp %>% 
+  group_by(batter, game_year) %>% 
+  summarise(xwoba_batter = mean(estimated_woba_using_speedangle, na.rm = TRUE))
+
+aggregated_xwoba_pitchers <- pbp %>% 
+  group_by(pitcher, game_year) %>% 
+  summarise(xwoba_pitcher = mean(estimated_woba_using_speedangle, na.rm = TRUE))
+
+innings_final <- innings %>% 
+  left_join(aggregated_xwoba_batter, by = c("batter", "game_year")) %>% 
+  left_join(aggregated_xwoba_pitchers, by = c("pitcher", "game_year")) %>% 
+  mutate(total_outs_before_play = ifelse(is.na(total_outs_before_play), 0, total_outs_before_play)) 
+
+innings_final_runs <- innings_final %>% filter(runs_scored_on_play > 0 &  WPA_swing_pitching_team <= 0) %>% 
+  mutate(gamma_attempt = abs(WPA_swing_pitching_team),
+         gamma_attempt = ifelse(gamma_attempt == 0, .000001, gamma_attempt))
+
+
+```
+
+
+
+```{r}
+ggplot(innings_final_runs, aes(x = gamma_attempt)) + 
+  geom_density()
+```
+
+
+
+
+
+
+
+
+```{r}
+
+gam_wpa_outs_beta <- gam(gamma_attempt ~ s(total_outs_before_play) + s(xwoba_batter) +
+                 s(xwoba_pitcher) + s(pitching_team_score_diff) +
+                 s(runs_scored_on_play, k = 4) + outs_when_up + as.factor(base_state) +
+                 te(total_outs_before_play, pitching_team_score_diff), 
+               family = betar, 
+               data = innings_final_runs)
+
+summary(gam_wpa_outs_beta)
+
+```
+
+```{r}
+# Create a dataframe with all combinations of these variables, holding others constant
+gam_wpa_constant_outs <- expand.grid(
+base_state = '000',
+xwoba_batter = mean(innings_final_runs$xwoba_batter),
+xwoba_pitcher = mean(innings_final_runs$xwoba_pitcher),
+pitching_team_score_diff = c(-25:25),
+outs_when_up = 0,
+runs_scored_on_play = 1,
+total_outs_before_play = c(0:47))
+
+# Make predictions using the GAM model
+gam_wpa_constant_outs$predicted_wpa <- predict(gam_wpa_outs_beta, newdata = gam_wpa_constant_outs, type = "response")
+gam_wpa_constant_outs <- gam_wpa_constant_outs %>% mutate(predicted_wpa = -predicted_wpa )
+
+ggplot(gam_wpa_constant_outs, aes(x = total_outs_before_play, y = predicted_wpa, color = factor(pitching_team_score_diff))) +
+  geom_line() +
+  labs(x = "Total Outs Before Play", y = "Predicted WPA (1 Run Scored)", color = "Score Differential") +
+  theme_minimal() +
+  theme(axis.text = element_text(size = 12), axis.title = element_text(size = 14))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+plot(gam_wpa_outs, pages=1)
+gam.check(gam_wpa_outs)
+```
+
+
+```{r}
+
+
+
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
