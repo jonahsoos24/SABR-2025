@@ -1,0 +1,12 @@
+name: HERO
+title: HERO
+username: adiamond17
+account: adiamond17
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 14232510
+bundleId: 9934693
+url: https://adiamond17.shinyapps.io/HERO/
+version: 1
+asMultiple: FALSE
+asStatic: FALSE
